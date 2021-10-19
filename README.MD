@@ -1,3 +1,8 @@
+#fork for openwrt
+use temp file for low memory
+
+generate m3u8 use #EXT-X-BYTERANGE tag for whole ts file
+
 # m3u8-Downloader-Go
 Download m3u8 media with multithreading, support decrypt
 
