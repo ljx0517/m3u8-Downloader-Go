@@ -10,6 +10,7 @@ import (
 	"m3u8-Downloader-Go/joiner"
 	"m3u8-Downloader-Go/zhttp"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -40,6 +41,38 @@ type Conf struct {
 	FixTS     bool          `clop:"-F; --fix" usage:"try to repair the ts file by removing the image header"`
 	headers   map[string]string
 }
+
+
+//调用os.MkdirAll递归创建文件夹
+func CreateMutiDir(filePath string) error {
+	if !isExist(filePath) {
+		err := os.MkdirAll(filePath, os.ModePerm)
+		if err != nil {
+			log.Fatalln("[-] create dir failed:", err)
+			return err
+		}
+		return err
+	}
+	return nil
+}
+
+// 判断所给路径文件/文件夹是否存在(返回true是存在)
+func isExist(path string) bool {
+	_, err := os.Stat(path) //os.Stat获取文件信息
+	if err != nil {
+		if os.IsExist(err) {
+			return true
+		}
+		return false
+	}
+	return true
+}
+
+
+
+
+
+
 
 func init() {
 	conf = &Conf{}
@@ -85,13 +118,14 @@ func parseHeaders() {
 	}
 }
 
-func start(mpl *m3u8.MediaPlaylist) {
+func start(mpl *m3u8.MediaPlaylist, tmpFolder string) {
 	pool := hackpool.New(conf.ThreadNum, download)
 
 	go func() {
-		var count = int(mpl.Count())
-		for i := 0; i < count; i++ {
-			pool.Push(i, mpl.Segments[i], mpl.Key)
+		var count = uint(mpl.Count())
+		var i uint = 0;
+		for ; i < count; i++ {
+			pool.Push(i, mpl.Segments[i], mpl.Key, tmpFolder)
 		}
 		pool.CloseQueue()
 	}()
@@ -188,9 +222,11 @@ func getKey(url string) ([]byte, error) {
 }
 
 func download(args ...interface{}) {
-	id := args[0].(int)
+	id := args[0].(uint)
 	segment := args[1].(*m3u8.MediaSegment)
 	globalKey := args[2].(*m3u8.Key)
+
+	saveFolder := args[3].(string)
 
 	statusCode, data, err := ZHTTP.Get(segment.URI, conf.headers, conf.Retry)
 	if err != nil {
@@ -232,13 +268,19 @@ func download(args ...interface{}) {
 		}
 	}
 
-	log.Println("[+] Download succed:", id, segment.URI)
+	log.Println("[+] Download success:", id, segment.URI)
 
 	if conf.FixTS {
 		data = fixTSFile(data)
 	}
 
-	JOINER.Join(id, data)
+	tempTs := filepath.Join(saveFolder, fmt.Sprintf("%d", id) + ".ts" )
+	err = ioutil.WriteFile(tempTs, data, 0644)
+	if err != nil {
+		log.Fatalln("[-] write key failed:", tempTs, err)
+	}
+	//JOINER.Join(id, data)
+	JOINER.JoinFile(id, tempTs)
 }
 
 func formatURI(base *url.URL, u string) (string, error) {
@@ -304,10 +346,11 @@ func main() {
 	}
 
 	mpl, err := parseM3u8(data)
+	mpl.SetVersion(4)
 	if err != nil {
 		log.Fatalln("[-] Parse m3u8 file failed:", err)
 	} else {
-		log.Println("[+] Parse m3u8 file succed")
+		log.Println("[+] Parse m3u8 file success")
 	}
 
 	outFile := conf.OutFile
@@ -315,7 +358,13 @@ func main() {
 		outFile = filename(mpl.Segments[0].URI)
 	}
 
-	JOINER, err = joiner.New(outFile)
+	tsTempFolder := outFile + "_tmp"
+	if !isExist(tsTempFolder){
+		CreateMutiDir(tsTempFolder)
+	}
+
+
+	JOINER, err = joiner.New(outFile, mpl)
 	if err != nil {
 		log.Fatalln("[-] Open file failed:", err)
 	} else {
@@ -325,12 +374,19 @@ func main() {
 	if mpl.Count() > 0 {
 		log.Println("[+] Total", mpl.Count(), "files to download")
 
-		start(mpl)
+		start(mpl, tsTempFolder)
 
-		err = JOINER.Run(int(mpl.Count()))
+		var result string
+		result, err = JOINER.Run(uint(mpl.Count()))
+		m3u8Playlist := outFile + ".m3u8"
+		ioutil.WriteFile(m3u8Playlist, []byte(result), 0644)
 		if err != nil {
 			log.Fatalln("[-] Write to file failed:", err)
 		}
-		log.Println("[+] Download succed, saved to", JOINER.Name(), "cost:", time.Since(t))
+		err = os.RemoveAll(tsTempFolder)
+		if err != nil {
+			log.Fatalln("[-] Remove tmp folder failed:", err)
+		}
+		log.Println("[+] Download success, saved to", JOINER.Name(), "cost:", time.Since(t))
 	}
 }

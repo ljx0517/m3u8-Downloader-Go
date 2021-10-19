@@ -2,6 +2,7 @@ package zhttp
 
 import (
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
 	"time"
@@ -58,6 +59,9 @@ func (zhttp *Zhttp) Get(url string, headers map[string]string, retry int) (int, 
 		var resp *http.Response
 		resp, err = zhttp.client.Do(req)
 		if err != nil {
+			wait := time.Duration(3 * count )
+			log.Println("[-] fetch error:", url, "error:",  err, ",wait", wait, "secs")
+			time.Sleep(time.Second * wait )
 			continue
 		}
 
@@ -65,6 +69,9 @@ func (zhttp *Zhttp) Get(url string, headers map[string]string, retry int) (int, 
 		resp.Body.Close()
 
 		if err != nil {
+			wait := time.Duration(3 * count )
+			log.Println("[-] read error:", url, "error:",  err, ",wait", wait, "secs")
+			time.Sleep(time.Second * wait )
 			continue
 		}
 
